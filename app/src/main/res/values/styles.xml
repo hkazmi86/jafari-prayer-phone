@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.JafariPrayerPhone" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#F5C542</item>
+        <item name="colorPrimaryVariant">#12352C</item>
+        <item name="colorOnPrimary">#000000</item>
+        <item name="colorSecondary">#69F0AE</item>
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#0A0C0E</item>
+    </style>
+</resources>
