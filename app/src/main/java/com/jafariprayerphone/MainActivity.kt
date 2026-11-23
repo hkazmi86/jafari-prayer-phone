@@ -426,7 +426,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // Footer Card: Imsak & Shari'i Midnight
         val footerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = pillBg("#590A0F12", 16, "#38FFFFFF")
+            background = pillBg("#8C0A0F12", 16, "#38FFFFFF")
             setPadding(dp(14), dp(11), dp(14), dp(11))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -539,7 +539,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val isPast = isToday && e.epochMillis <= now
             val color = when {
                 isNext -> Color.parseColor("#69F0AE")
-                isPast -> Color.parseColor("#B0BAC2")
+                isPast -> Color.WHITE
                 else -> Color.WHITE
             }
             val row = LinearLayout(this).apply {
