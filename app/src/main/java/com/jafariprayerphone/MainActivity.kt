@@ -19,6 +19,7 @@ import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -74,18 +75,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var timesLocLabel: TextView? = null
     private var timesPhotoCaption: TextView? = null
 
-    // Qibla compass refs
+    // Qibla compass & map refs
     private var sensorManager: SensorManager? = null
+    private var qiblaBearingTv: TextView? = null
+    private var qiblaDistTv: TextView? = null
     private var qiblaHeadingView: TextView? = null
+    private var qiblaLayerBtn: TextView? = null
     private var qiblaWebView: WebView? = null
     private var currentQiblaBearing: Double = 0.0
+    private var isSatelliteMode: Boolean = true
+    private var qiblaPageLoaded: Boolean = false
+    private var pendingQiblaCenter: Pair<Double, Double>? = null
 
     private val locationPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
         val ok = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (ok) fetchGpsLocation() else Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
+        if (ok) {
+            if (activeTab == 1) centerQiblaOnLiveGps() else fetchGpsLocation()
+        } else {
+            Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private val notifPermLauncher = registerForActivityResult(
@@ -158,7 +169,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         root.addView(bgImageView)
 
-        // Layer 2: Dark Gradient Scrim for guaranteed legibility
+        // Layer 2: Light Gradient Scrim so Masjid photos shine clearly while text stays legible
         bgScrimView = View(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -167,9 +178,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             background = GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
                 intArrayOf(
-                    Color.parseColor("#B8000000"),
-                    Color.parseColor("#CC050B0A"),
-                    Color.parseColor("#EE000000")
+                    Color.parseColor("#33000000"),
+                    Color.parseColor("#4D000000"),
+                    Color.parseColor("#7A000000")
                 )
             )
         }
@@ -196,7 +207,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         // Bottom Navigation Bar
         val navBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.parseColor("#E60A0D0F"))
+            setBackgroundColor(Color.parseColor("#D90A0D0F"))
             setPadding(dp(8), dp(8), dp(8), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -229,7 +240,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun updateNavHighlights() {
         navButtons.forEachIndexed { idx, tv ->
             val selected = idx == activeTab
-            tv.setTextColor(if (selected) Color.parseColor("#F5C542") else Color.parseColor("#8A949C"))
+            tv.setTextColor(if (selected) Color.parseColor("#F5C542") else Color.parseColor("#9BA6AE"))
             tv.typeface = if (selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
         }
     }
@@ -244,7 +255,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         bgScrimView.visibility = View.VISIBLE
-        // Rich dark emerald-midnight fallback gradient while photo loads
         bgImageView.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM,
             intArrayOf(
@@ -300,6 +310,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(6f, 0f, 2f, Color.BLACK)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener {
                 activeTab = 2
@@ -311,7 +322,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setTextColor(Color.parseColor("#69F0AE"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
             setPadding(dp(10), dp(5), dp(10), dp(5))
-            background = pillBg("#CC12352C", 14)
+            background = pillBg("#A612352C", 14, "#4069F0AE")
             setOnClickListener {
                 prefs.method = if (prefs.method == CalcMethod.LEVA) CalcMethod.TEHRAN else CalcMethod.LEVA
                 text = prefs.method.shortLabel
@@ -326,8 +337,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         // Gregorian & Hijri Dates
         timesDateGreg = TextView(this).apply {
-            setTextColor(Color.parseColor("#CFD8DC"))
+            setTextColor(Color.parseColor("#EAEFF2"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+            setShadowLayer(5f, 0f, 1f, Color.BLACK)
             setPadding(0, dp(4), 0, 0)
         }
         col.addView(timesDateGreg)
@@ -335,11 +347,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         timesDateHijri = TextView(this).apply {
             setTextColor(Color.parseColor("#F5C542"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+            typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(5f, 0f, 1f, Color.BLACK)
             setPadding(0, dp(2), 0, dp(12))
         }
         col.addView(timesDateHijri)
 
-        // Date Navigation Row (< | Pick Date | Today | >)
+        // Date Navigation Row
         val dateNav = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -376,57 +390,60 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         })
         col.addView(dateNav)
 
-        // Countdown Banner Card
+        // Frosted Glass Countdown Banner Card
         val countdownCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            background = pillBg("#9912181B", 18, "#33F5C542")
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = pillBg("#590A0F12", 18, "#45F5C542")
+            setPadding(dp(16), dp(13), dp(16), dp(13))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(14) }
+            ).apply { bottomMargin = dp(12) }
         }
         timesCountdownView = TextView(this).apply {
             setTextColor(Color.parseColor("#F5C542"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
             typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(4f, 0f, 1f, Color.BLACK)
             gravity = Gravity.CENTER
         }
         countdownCard.addView(timesCountdownView)
         col.addView(countdownCard)
 
-        // Prayer Rows Container Card
+        // Frosted Glass Prayer Rows Container Card
         timesRowsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = pillBg("#99101417", 18, "#26FFFFFF")
+            background = pillBg("#590A0F12", 18, "#38FFFFFF")
             setPadding(dp(12), dp(10), dp(12), dp(10))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(14) }
+            ).apply { bottomMargin = dp(12) }
         }
         col.addView(timesRowsContainer)
 
         // Footer Card: Imsak & Shari'i Midnight
         val footerRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = pillBg("#99101417", 16, "#26FFFFFF")
-            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = pillBg("#590A0F12", 16, "#38FFFFFF")
+            setPadding(dp(14), dp(11), dp(14), dp(11))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { bottomMargin = dp(14) }
+            ).apply { bottomMargin = dp(12) }
         }
         timesFooterImsak = TextView(this).apply {
-            setTextColor(Color.parseColor("#CFD8DC"))
+            setTextColor(Color.parseColor("#EAEFF2"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setShadowLayer(4f, 0f, 1f, Color.BLACK)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         timesFooterMidnight = TextView(this).apply {
-            setTextColor(Color.parseColor("#CFD8DC"))
+            setTextColor(Color.parseColor("#EAEFF2"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setShadowLayer(4f, 0f, 1f, Color.BLACK)
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -434,12 +451,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         footerRow.addView(timesFooterMidnight)
         col.addView(footerRow)
 
-        // Subtle Masjid Photo Caption (tap to cycle next photo)
+        // Masjid Photo Caption (tap to cycle next photo)
         val photo = MasjidGallery.photos[currentPhotoIndex]
         timesPhotoCaption = TextView(this).apply {
             text = "🖼 ${photo.title} · ${photo.city}  (tap for next)"
-            setTextColor(Color.parseColor("#99FFFFFF"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+            setTextColor(Color.parseColor("#E6FFFFFF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setShadowLayer(5f, 0f, 1f, Color.BLACK)
             gravity = Gravity.CENTER
             visibility = if (prefs.useMasjidBackgrounds) View.VISIBLE else View.GONE
             setPadding(dp(8), dp(6), dp(8), dp(8))
@@ -521,7 +539,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val isPast = isToday && e.epochMillis <= now
             val color = when {
                 isNext -> Color.parseColor("#69F0AE")
-                isPast -> Color.parseColor("#7D858D")
+                isPast -> Color.parseColor("#B0BAC2")
                 else -> Color.WHITE
             }
             val row = LinearLayout(this).apply {
@@ -529,13 +547,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12), dp(11), dp(12), dp(11))
                 if (isNext) {
-                    background = pillBg("#D912352C", 12)
+                    background = pillBg("#BF12352C", 12, "#4069F0AE")
                 }
             }
             val nameTv = TextView(this).apply {
                 text = e.name
                 setTextColor(color)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setShadowLayer(4f, 0f, 1f, Color.BLACK)
                 typeface = if (isNext) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
@@ -543,6 +562,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 text = JafariPrayerCalculator.formatTime(e.epochMillis, tz, prefs.use24Hour)
                 setTextColor(color)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+                setShadowLayer(4f, 0f, 1f, Color.BLACK)
                 typeface = if (isNext) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             }
             row.addView(nameTv)
@@ -557,8 +577,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     // =========================================================================
-    // TAB 1: SATELLITE QIBLA FINDER
+    // TAB 1: INTERACTIVE SATELLITE / MAP QIBLA FINDER
     // =========================================================================
+    inner class QiblaJsBridge {
+        @JavascriptInterface
+        fun onCenterMoved(bearingDeg: Double, distKm: Double) {
+            runOnUiThread {
+                currentQiblaBearing = bearingDeg
+                val cardinal = JafariPrayerCalculator.compassCardinal(bearingDeg)
+                val distMi = distKm * 0.621371
+                qiblaBearingTv?.text = String.format(Locale.US, "Qibla: %.1f° %s", bearingDeg, cardinal)
+                qiblaDistTv?.text = String.format(Locale.US, "Distance: %,.0f mi (%,.0f km) · Drag map to aim", distMi, distKm)
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun buildQiblaTab() {
         val col = LinearLayout(this).apply {
@@ -570,22 +603,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setPadding(0, dp(36), 0, 0)
         }
 
-        if (!prefs.hasLocation) {
-            val msg = TextView(this).apply {
-                text = "Set a GPS or city location first to view the Qibla satellite line."
-                setTextColor(Color.WHITE)
-                gravity = Gravity.CENTER
-                setPadding(dp(24), dp(80), dp(24), dp(24))
-            }
-            col.addView(msg)
-            contentFrame.addView(col)
-            return
-        }
-
-        val lat = prefs.latitude
-        val lng = prefs.longitude
-        currentQiblaBearing = JafariPrayerCalculator.qiblaBearingDegrees(lat, lng)
-        val distKm = JafariPrayerCalculator.distanceToKaabaKm(lat, lng)
+        val startLat = if (prefs.hasLocation) prefs.latitude else 38.8977
+        val startLng = if (prefs.hasLocation) prefs.longitude else -77.0365
+        currentQiblaBearing = JafariPrayerCalculator.qiblaBearingDegrees(startLat, startLng)
+        val distKm = JafariPrayerCalculator.distanceToKaabaKm(startLat, startLng)
         val distMi = distKm * 0.621371
         val cardinal = JafariPrayerCalculator.compassCardinal(currentQiblaBearing)
 
@@ -593,50 +614,60 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val infoCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = pillBg("#CC101417", 16, "#33F5C542")
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setPadding(dp(14), dp(11), dp(14), dp(11))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                setMargins(dp(14), dp(4), dp(14), dp(10))
+                setMargins(dp(12), dp(4), dp(12), dp(8))
             }
         }
+
         val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val bearingTv = TextView(this).apply {
+        qiblaBearingTv = TextView(this).apply {
             text = String.format(Locale.US, "Qibla: %.1f° %s", currentQiblaBearing, cardinal)
             setTextColor(Color.parseColor("#F5C542"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 17f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16.5f)
             typeface = Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
-        val recenterBtn = smallChip("⌖ Re-center") {
-            qiblaWebView?.evaluateJavascript("recenterMap();", null)
+        qiblaLayerBtn = smallChip(if (isSatelliteMode) "🗺 Map" else "🛰 Satellite") {
+            isSatelliteMode = !isSatelliteMode
+            qiblaLayerBtn?.text = if (isSatelliteMode) "🗺 Map" else "🛰 Satellite"
+            qiblaWebView?.evaluateJavascript("setSatelliteMode($isSatelliteMode);", null)
         }
-        titleRow.addView(bearingTv)
-        titleRow.addView(recenterBtn)
+        val myGpsBtn = smallChip("📍 GPS") {
+            centerQiblaOnLiveGps()
+        }
+        titleRow.addView(qiblaBearingTv)
+        titleRow.addView(qiblaLayerBtn)
+        titleRow.addView(hSpace(6))
+        titleRow.addView(myGpsBtn)
         infoCard.addView(titleRow)
 
-        val distTv = TextView(this).apply {
-            text = String.format(Locale.US, "Distance to Kaaba: %,.0f mi (%,.0f km)", distMi, distKm)
+        qiblaDistTv = TextView(this).apply {
+            text = String.format(Locale.US, "Distance: %,.0f mi (%,.0f km) · Drag map to aim", distMi, distKm)
             setTextColor(Color.parseColor("#CFD8DC"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, dp(3), 0, dp(2))
         }
-        infoCard.addView(distTv)
+        infoCard.addView(qiblaDistTv)
 
         qiblaHeadingView = TextView(this).apply {
             text = "Phone heading: calibrating compass..."
             setTextColor(Color.parseColor("#B0BEC5"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
             typeface = Typeface.DEFAULT_BOLD
         }
         infoCard.addView(qiblaHeadingView)
         col.addView(infoCard)
 
-        // Satellite Map WebView (Esri World Imagery + Leaflet geodesic line to Makkah)
+        // Interactive Map WebView
+        qiblaPageLoaded = false
+        pendingQiblaCenter = null
         val web = WebView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -647,19 +678,75 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.cacheMode = WebSettings.LOAD_DEFAULT
-            webViewClient = WebViewClient()
+            addJavascriptInterface(QiblaJsBridge(), "AndroidBridge")
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    qiblaPageLoaded = true
+                    pendingQiblaCenter?.let { (lat, lng) ->
+                        view?.evaluateJavascript("centerOnGps($lat, $lng);", null)
+                        pendingQiblaCenter = null
+                    }
+                }
+            }
         }
         qiblaWebView = web
 
-        val html = buildQiblaHtml(lat, lng)
+        val html = buildQiblaHtml(startLat, startLng, isSatelliteMode)
         web.loadDataWithBaseURL("https://jafariprayer.local/", html, "text/html", "UTF-8", null)
         col.addView(web)
 
         contentFrame.addView(col)
         startCompass()
+        // Automatically snap to live GPS when opening Qibla tab
+        centerQiblaOnLiveGps()
     }
 
-    private fun buildQiblaHtml(lat: Double, lng: Double): String {
+    private fun centerQiblaOnLiveGps() {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasFine && !hasCoarse) {
+            locationPermLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+            return
+        }
+
+        val client = LocationServices.getFusedLocationProviderClient(this)
+        val cts = CancellationTokenSource()
+        try {
+            client.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token)
+                .addOnSuccessListener { loc ->
+                    if (loc != null) {
+                        moveQiblaMapTo(loc.latitude, loc.longitude)
+                    } else {
+                        client.lastLocation.addOnSuccessListener { last ->
+                            if (last != null) {
+                                moveQiblaMapTo(last.latitude, last.longitude)
+                            }
+                        }
+                    }
+                }
+        } catch (_: SecurityException) {
+        }
+    }
+
+    private fun moveQiblaMapTo(lat: Double, lng: Double) {
+        if (qiblaPageLoaded && qiblaWebView != null) {
+            qiblaWebView?.evaluateJavascript("centerOnGps($lat, $lng);", null)
+        } else {
+            pendingQiblaCenter = Pair(lat, lng)
+        }
+    }
+
+    private fun buildQiblaHtml(lat: Double, lng: Double, satelliteStart: Boolean): String {
         return """
 <!DOCTYPE html>
 <html>
@@ -668,35 +755,70 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
-  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; }
+  html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0d1117; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <script>
-  const userLat = $lat;
-  const userLng = $lng;
   const kaabaLat = 21.422487;
   const kaabaLng = 39.826206;
 
-  const map = L.map('map', { zoomControl: true }).setView([userLat, userLng], 19);
+  const map = L.map('map', { zoomControl: true }).setView([$lat, $lng], 17);
 
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  const satLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxNativeZoom: 18,
     maxZoom: 20,
     attribution: 'Esri Satellite'
-  }).addTo(map);
+  });
 
-  // Compute Great-Circle (Geodesic) points from User -> Kaaba
+  const satLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+    maxNativeZoom: 18,
+    maxZoom: 20,
+    opacity: 0.8
+  });
+
+  const satPlaces = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+    maxNativeZoom: 18,
+    maxZoom: 20,
+    opacity: 0.85
+  });
+
+  const satGroup = L.layerGroup([satLayer, satLabels, satPlaces]);
+
+  const streetLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxNativeZoom: 19,
+    maxZoom: 20,
+    attribution: 'OpenStreetMap'
+  });
+
+  let activeIsSat = $satelliteStart;
+  if (activeIsSat) { satGroup.addTo(map); } else { streetLayer.addTo(map); }
+
+  function setSatelliteMode(useSat) {
+    if (useSat === activeIsSat) return;
+    activeIsSat = useSat;
+    if (useSat) {
+      map.removeLayer(streetLayer);
+      satGroup.addTo(map);
+    } else {
+      map.removeLayer(satGroup);
+      streetLayer.addTo(map);
+    }
+  }
+
   function toRad(d) { return d * Math.PI / 180; }
   function toDeg(r) { return r * 180 / Math.PI; }
 
   function geodesicPoints(lat1, lon1, lat2, lon2, steps) {
     const p1 = toRad(lat1), l1 = toRad(lon1);
     const p2 = toRad(lat2), l2 = toRad(lon2);
-    const d = 2 * Math.asin(Math.sqrt(
-      Math.pow(Math.sin((p2 - p1) / 2), 2) +
-      Math.cos(p1) * Math.cos(p2) * Math.pow(Math.sin((l2 - l1) / 2), 2)
-    ));
+    const sinHalfLat = Math.sin((p2 - p1) / 2);
+    const sinHalfLon = Math.sin((l2 - l1) / 2);
+    const d = 2 * Math.asin(Math.min(1, Math.sqrt(
+      sinHalfLat * sinHalfLat + Math.cos(p1) * Math.cos(p2) * sinHalfLon * sinHalfLon
+    )));
+    if (d < 1e-7) return [[lat1, lon1], [lat2, lon2]];
     const pts = [];
     for (let i = 0; i <= steps; i++) {
       const f = i / steps;
@@ -705,26 +827,52 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
       const x = A * Math.cos(p1) * Math.cos(l1) + B * Math.cos(p2) * Math.cos(l2);
       const y = A * Math.cos(p1) * Math.sin(l1) + B * Math.cos(p2) * Math.sin(l2);
       const z = A * Math.sin(p1) + B * Math.sin(p2);
-      const lat = toDeg(Math.atan2(z, Math.sqrt(x * x + y * y)));
-      const lon = toDeg(Math.atan2(y, x));
-      pts.push([lat, lon]);
+      pts.push([toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), toDeg(Math.atan2(y, x))]);
     }
     return pts;
   }
 
-  const linePts = geodesicPoints(userLat, userLng, kaabaLat, kaabaLng, 120);
-  L.polyline(linePts, { color: '#F5C542', weight: 4, opacity: 0.95 }).addTo(map);
+  function calcBearing(lat1, lon1) {
+    const p1 = toRad(lat1), p2 = toRad(kaabaLat), dL = toRad(kaabaLng - lon1);
+    const y = Math.sin(dL) * Math.cos(p2);
+    const x = Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dL);
+    return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
 
-  L.circleMarker([userLat, userLng], {
-    radius: 8, fillColor: '#69F0AE', color: '#000', weight: 2, fillOpacity: 1
-  }).addTo(map).bindPopup('Your Location');
+  function calcDistKm(lat1, lon1) {
+    const R = 6371;
+    const dLat = toRad(kaabaLat - lat1), dLon = toRad(kaabaLng - lon1);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(kaabaLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  const qiblaLine = L.polyline([], { color: '#F5C542', weight: 4, opacity: 0.95 }).addTo(map);
+
+  const centerPin = L.circleMarker([$lat, $lng], {
+    radius: 8, fillColor: '#69F0AE', color: '#000000', weight: 2.5, fillOpacity: 1
+  }).addTo(map);
 
   L.circleMarker([kaabaLat, kaabaLng], {
-    radius: 8, fillColor: '#F5C542', color: '#000', weight: 2, fillOpacity: 1
+    radius: 8, fillColor: '#F5C542', color: '#000000', weight: 2, fillOpacity: 1
   }).addTo(map).bindPopup('Kaaba, Makkah');
 
-  function recenterMap() {
-    map.setView([userLat, userLng], 19);
+  function updateFromCenter() {
+    const c = map.getCenter();
+    centerPin.setLatLng(c);
+    qiblaLine.setLatLngs(geodesicPoints(c.lat, c.lng, kaabaLat, kaabaLng, 100));
+    if (window.AndroidBridge && window.AndroidBridge.onCenterMoved) {
+      window.AndroidBridge.onCenterMoved(calcBearing(c.lat, c.lng), calcDistKm(c.lat, c.lng));
+    }
+  }
+
+  map.on('move', updateFromCenter);
+  map.on('zoomend', updateFromCenter);
+  updateFromCenter();
+
+  function centerOnGps(lat, lng) {
+    map.setView([lat, lng], 17);
+    updateFromCenter();
   }
 </script>
 </body>
@@ -783,7 +931,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             requestOrFetchGps()
         })
 
-        // Search Box
         val searchRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -797,7 +944,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setHintTextColor(Color.parseColor("#8A949C"))
             setTextColor(Color.WHITE)
             setSingleLine(true)
-            background = pillBg("#CC1A2024", 14, "#33FFFFFF")
+            background = pillBg("#B31A2024", 14, "#38FFFFFF")
             setPadding(dp(14), dp(12), dp(14), dp(12))
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
@@ -839,12 +986,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         col.addView(searchRow)
         col.addView(resultsBox)
 
-        // Saved Favorite Cities
         val savedHeader = TextView(this).apply {
             text = "Saved Favorite Cities"
             setTextColor(Color.parseColor("#F5C542"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(4f, 0f, 1f, Color.BLACK)
             setPadding(0, dp(18), 0, dp(8))
         }
         col.addView(savedHeader)
@@ -853,8 +1000,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         if (saved.isEmpty()) {
             col.addView(TextView(this).apply {
                 text = "Search a city above and tap ★ Save to pin it here for 1-tap switching."
-                setTextColor(Color.parseColor("#8A949C"))
+                setTextColor(Color.parseColor("#CFD8DC"))
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setShadowLayer(4f, 0f, 1f, Color.BLACK)
             })
         } else {
             for (c in saved) {
@@ -870,7 +1018,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = pillBg("#CC151A1E", 14, "#26FFFFFF")
+            background = pillBg("#99151A1E", 14, "#33FFFFFF")
             setPadding(dp(12), dp(10), dp(12), dp(10))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -898,7 +1046,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         })
         infoCol.addView(TextView(this).apply {
             text = city.timeZoneId
-            setTextColor(Color.parseColor("#8A949C"))
+            setTextColor(Color.parseColor("#B0BEC5"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
         })
         card.addView(infoCol)
@@ -930,7 +1078,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         col.addView(sectionHeader("Settings"))
 
-        // Calculation Method
         col.addView(settingToggleCard(
             title = "Calculation Method",
             subtitle = prefs.method.label,
@@ -940,7 +1087,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             syncAndRedraw()
         })
 
-        // 7 vs 5 rows
         col.addView(settingToggleCard(
             title = "Displayed Prayer Rows",
             subtitle = if (prefs.showSevenRows) "7 Rows (Fajr, Sunrise, Dhuhr, Asr, Sunset, Maghrib, Isha)" else "5 Rows (Fajr, Sunrise, Dhuhr, Sunset, Maghrib)",
@@ -950,7 +1096,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             syncAndRedraw()
         })
 
-        // 12h / 24h
         col.addView(settingToggleCard(
             title = "Clock Format",
             subtitle = if (prefs.use24Hour) "24-Hour (17:11)" else "12-Hour (5:11 PM)",
@@ -960,11 +1105,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             syncAndRedraw()
         })
 
-        // Hijri Offset
         val hijriCard = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = pillBg("#CC151A1E", 14, "#26FFFFFF")
+            background = pillBg("#99151A1E", 14, "#33FFFFFF")
             setPadding(dp(14), dp(12), dp(14), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -984,22 +1128,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val offsetSign = if (prefs.hijriOffsetDays > 0) "+${prefs.hijriOffsetDays}" else "${prefs.hijriOffsetDays}"
         hLabel.addView(TextView(this).apply {
             text = "Offset: $offsetSign day(s)"
-            setTextColor(Color.parseColor("#8A949C"))
+            setTextColor(Color.parseColor("#B0BEC5"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
         })
         hijriCard.addView(hLabel)
         hijriCard.addView(smallChip("−") {
             prefs.hijriOffsetDays = (prefs.hijriOffsetDays - 1).coerceAtLeast(-2)
+            PrayerWidgetProvider.updateAllWidgets(this)
             renderCurrentTab()
         })
         hijriCard.addView(hSpace(8))
         hijriCard.addView(smallChip("+") {
             prefs.hijriOffsetDays = (prefs.hijriOffsetDays + 1).coerceAtMost(2)
+            PrayerWidgetProvider.updateAllWidgets(this)
             renderCurrentTab()
         })
         col.addView(hijriCard)
 
-        // Background Photos Toggle
         col.addView(settingToggleCard(
             title = "App Background",
             subtitle = if (prefs.useMasjidBackgrounds) "Rotating Masjid Photos" else "AMOLED Pure Black",
@@ -1010,10 +1155,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             renderCurrentTab()
         })
 
-        // Widget Opacity Slider
         val opacityCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = pillBg("#CC151A1E", 14, "#26FFFFFF")
+            background = pillBg("#99151A1E", 14, "#33FFFFFF")
             setPadding(dp(14), dp(12), dp(14), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1028,7 +1172,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         val opHint = TextView(this).apply {
             text = "0% = Fully Transparent · 100% = Solid Black"
-            setTextColor(Color.parseColor("#8A949C"))
+            setTextColor(Color.parseColor("#B0BEC5"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
             setPadding(0, dp(2), 0, dp(8))
         }
@@ -1051,10 +1195,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         opacityCard.addView(seek)
         col.addView(opacityCard)
 
-        // Notifications Section
         val notifCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = pillBg("#CC151A1E", 14, "#26FFFFFF")
+            background = pillBg("#99151A1E", 14, "#33FFFFFF")
             setPadding(dp(14), dp(12), dp(14), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1195,6 +1338,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setTextColor(Color.parseColor("#F5C542"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
             typeface = Typeface.DEFAULT_BOLD
+            setShadowLayer(4f, 0f, 1f, Color.BLACK)
             setPadding(0, 0, 0, dp(14))
         }
     }
@@ -1208,7 +1352,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = pillBg("#CC151A1E", 14, "#26FFFFFF")
+            background = pillBg("#99151A1E", 14, "#33FFFFFF")
             setPadding(dp(14), dp(12), dp(14), dp(12))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1227,7 +1371,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         })
         textCol.addView(TextView(this).apply {
             text = subtitle
-            setTextColor(Color.parseColor("#8A949C"))
+            setTextColor(Color.parseColor("#B0BEC5"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             setPadding(0, dp(2), dp(8), 0)
         })
@@ -1241,8 +1385,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             text = label
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
-            background = pillBg("#CC222A30", 12, "#33FFFFFF")
-            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = pillBg("#99222A30", 12, "#40FFFFFF")
+            setPadding(dp(11), dp(7), dp(11), dp(7))
             setOnClickListener { onClick() }
         }
     }
