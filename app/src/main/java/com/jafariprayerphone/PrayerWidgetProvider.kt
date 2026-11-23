@@ -64,11 +64,9 @@ class PrayerWidgetProvider : AppWidgetProvider() {
             val prefs = PrayerPrefs(context)
             val views = RemoteViews(context.packageName, R.layout.widget_prayer)
 
-            // Apply user-configured translucency (0% - 100%)
             val alpha255 = (prefs.widgetOpacityPercent * 255 / 100).coerceIn(0, 255)
             views.setInt(R.id.widget_bg, "setImageAlpha", alpha255)
 
-            // Tap root to open main app
             val openAppPi = PendingIntent.getActivity(
                 context,
                 0,
@@ -77,7 +75,6 @@ class PrayerWidgetProvider : AppWidgetProvider() {
             )
             views.setOnClickPendingIntent(R.id.widget_root, openAppPi)
 
-            // Tap refresh icon to force update
             val refreshPi = PendingIntent.getBroadcast(
                 context,
                 1,
@@ -85,6 +82,11 @@ class PrayerWidgetProvider : AppWidgetProvider() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             views.setOnClickPendingIntent(R.id.widget_refresh, refreshPi)
+
+            val tz = prefs.activeTimeZone()
+            val todayCal = Calendar.getInstance(tz)
+            val hijriStr = JafariPrayerCalculator.formatHijriDate(todayCal, prefs.hijriOffsetDays)
+            views.setTextViewText(R.id.widget_hijri, hijriStr)
 
             if (!prefs.hasLocation) {
                 views.setTextViewText(R.id.widget_countdown, "Tap to set location")
@@ -96,16 +98,14 @@ class PrayerWidgetProvider : AppWidgetProvider() {
                 return
             }
 
-            val tz = prefs.activeTimeZone()
             val now = System.currentTimeMillis()
-            val cal = Calendar.getInstance(tz)
             val today = JafariPrayerCalculator.calculateForDate(
-                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH),
+                todayCal.get(Calendar.YEAR), todayCal.get(Calendar.MONTH), todayCal.get(Calendar.DAY_OF_MONTH),
                 prefs.latitude, prefs.longitude, tz, prefs.method
             )
-            cal.add(Calendar.DAY_OF_YEAR, 1)
+            val tomorrowCal = (todayCal.clone() as Calendar).apply { add(Calendar.DAY_OF_YEAR, 1) }
             val tomorrow = JafariPrayerCalculator.calculateForDate(
-                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH),
+                tomorrowCal.get(Calendar.YEAR), tomorrowCal.get(Calendar.MONTH), tomorrowCal.get(Calendar.DAY_OF_MONTH),
                 prefs.latitude, prefs.longitude, tz, prefs.method
             )
 
