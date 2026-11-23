@@ -19,61 +19,60 @@ data class MasjidPhoto(
 
 object MasjidGallery {
 
-    // Verified Wikimedia Commons photos served as crisp 1080px thumbnails and cached locally
     val photos = listOf(
         MasjidPhoto(
-            "najaf",
+            "najaf_hd",
             "Imam Ali Shrine",
             "Najaf, Iraq",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Imam_Ali_Shrine,_Najaf.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Shrine_of_Imam_Ali_Najaf_August_2023.jpg?width=1200"
         ),
         MasjidPhoto(
-            "karbala",
+            "karbala_hd",
             "Imam Husayn Shrine",
             "Karbala, Iraq",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Imam_Hussain_shrine_in_frame.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/The_shrine_of_Imam_Hussain_in_Karbala.jpg?width=1200"
         ),
         MasjidPhoto(
             "mashhad",
             "Imam Reza Shrine",
             "Mashhad, Iran",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Imam_Reza_shrine.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Imam_Reza_shrine.jpg?width=1200"
         ),
         MasjidPhoto(
             "qom",
             "Fatima Masumeh Shrine",
             "Qom, Iran",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Fatima_Masumeh_Shrine,_Qom,_Iran.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Fatima_Masumeh_Shrine,_Qom,_Iran.jpg?width=1200"
         ),
         MasjidPhoto(
             "makkah",
             "Masjid al-Haram",
             "Makkah, Saudi Arabia",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Masjid_al-Haram.JPG?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Masjid_al-Haram.JPG?width=1200"
         ),
         MasjidPhoto(
             "madinah",
             "Masjid an-Nabawi",
             "Madinah, Saudi Arabia",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Al-Masjid_al-Nabawi.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Al-Masjid_al-Nabawi.jpg?width=1200"
         ),
         MasjidPhoto(
             "shiraz",
             "Nasir al-Mulk Mosque",
             "Shiraz, Iran",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Nasir_al-mulk_mosque_1.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Nasir_al-mulk_mosque_1.jpg?width=1200"
         ),
         MasjidPhoto(
             "abudhabi",
             "Sheikh Zayed Grand Mosque",
             "Abu Dhabi, UAE",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Sheikh_Zayed_Grand_Mosque_in_Abu_Dhabi_-_panoramio.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Sheikh_Zayed_Grand_Mosque_in_Abu_Dhabi_-_panoramio.jpg?width=1200"
         ),
         MasjidPhoto(
             "istanbul",
             "Sultan Ahmed (Blue) Mosque",
             "Istanbul, Turkey",
-            "https://commons.wikimedia.org/wiki/Special:FilePath/Blue_Mosque_-_Istanbul.jpg?width=1080"
+            "https://commons.wikimedia.org/wiki/Special:FilePath/Blue_Mosque_-_Istanbul.jpg?width=1200"
         )
     )
 
@@ -120,7 +119,7 @@ object MasjidGallery {
                 val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 if (bmp != null) {
                     FileOutputStream(file).use { out ->
-                        bmp.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
                     }
                     return@withContext bmp
                 }
