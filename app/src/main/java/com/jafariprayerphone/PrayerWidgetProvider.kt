@@ -125,7 +125,7 @@ class PrayerWidgetProvider : AppWidgetProvider() {
                     val isPast = e.epochMillis <= now
                     val color = when {
                         isNext -> Color.parseColor("#69F0AE")
-                        isPast -> Color.parseColor("#8A949C")
+                        isPast -> Color.WHITE
                         else -> Color.WHITE
                     }
                     views.setViewVisibility(ROW_IDS[i], View.VISIBLE)
